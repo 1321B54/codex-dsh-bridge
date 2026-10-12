@@ -1,0 +1,13 @@
+{
+  "name": "local-dsh-coordinator-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reviewed local DSH runtime, never published or globally installed",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.0-rc.2"
+  },
+  "overrides": {
+    "@modelcontextprotocol/client": "2.2.0",
+    "fflate": "0.8.3"
+  }
+}
