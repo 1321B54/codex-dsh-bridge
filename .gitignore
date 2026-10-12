@@ -1,0 +1,16 @@
+.venv/
+.state/
+.workspaces/
+node_modules/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.log
+*.dpapi
+*.credentials*
+skills/dsh-collaboration/bridge-location.json
+*.pem
+*.key
+*.pfx
+*.p12
