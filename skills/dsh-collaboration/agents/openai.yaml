@@ -1,6 +1,6 @@
 interface:
-  display_name: "DSH 自动协作"
-  short_description: "开发任务自动分派给 DSH，由 Codex 规划、审查和验收结果"
-  default_prompt: "使用 $dsh-collaboration 完成当前项目的开发任务，自动分派适合的子任务并验收结果。"
+  display_name: "DSH 辅助"
+  short_description: "手动开启当前聊天的 DSH 辅助，由 Codex 规划、审查和验收"
+  default_prompt: "使用 $dsh-collaboration 开启当前聊天的 DSH 辅助；仅开启模式，不执行付费任务。"
 policy:
-  allow_implicit_invocation: true
+  allow_implicit_invocation: false

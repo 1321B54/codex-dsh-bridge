@@ -18,7 +18,7 @@ Codex 负责规划、审查和验收，DeepSeek Harness 执行明确、有限的
 
 Linux Token 保存在 `.state/token.credentials`：目录权限 `0700`，文件权限 `0600`，**文件内容未加密**，读取时拒绝符号链接、硬链接和不安全权限；同用户程序及 root 仍可读取。Windows 继续使用 DPAPI，不会转换已有凭据。Linux 运行时使用 Bash 和上游的 bwrap/Landlock 沙箱；沙箱不可用时拒绝 shell 执行，不退回全权限。`doctor` 只检查 SDK 初始化，不能代替实际 shell 沙箱测试。
 
-用户级技能位置为 `~/.agents/skills/dsh-collaboration`（见 [Codex 技能文档](https://learn.chatgpt.com/docs/build-skills)）；可用 `./install-skill.sh --skill-root /absolute/path` 指定目录。安装映射只在本机生成。自动协作规则与 Windows 相同，见下文。安装本身不派发任务；凭据和真实服务尚需用户自行配置与验证。
+用户级技能位置为 `~/.agents/skills/dsh-collaboration`（见 [Codex 技能文档](https://learn.chatgpt.com/docs/build-skills)）；可用 `./install-skill.sh --skill-root /absolute/path` 指定目录。安装映射只在本机生成。手动开启规则与 Windows 相同，见下文。安装本身不派发任务；凭据和真实服务尚需用户自行配置与验证。
 
 ```bash
 ./dsh-task.sh run --workspace task01 --task-file /path/to/task.md
@@ -43,13 +43,13 @@ Setup 安装本地 `.venv` 和 `node_modules`，不修改系统 Python 或安装
 Node/PowerShell 的机器路径仅写入忽略的 `.state/runtime-launch.json`，安装技能的路径映射也只在本机生成。
 用户级技能目录是 `$HOME/.agents/skills/dsh-collaboration`；新技能未被发现时重启 Codex。
 
-## 自动协作
+## 手动开启 DSH 辅助
 
-安装后无需先说“启用 DSH”。直接给出当前项目的功能开发、修复、重构、代码审查或测试目标，Codex 会按技能规则选择适合独立验收的子任务，调用 DSH，并审查、测试和整合结果。元数据保持 `allow_implicit_invocation: true`，技能描述也覆盖这些普通开发需求。
+每个新聊天默认关闭；普通开发需求不会自动启用 DSH。技能元数据使用 `allow_implicit_invocation: false`，只有人类显式选择后才采用协作流程。
 
-明确开发任务包含适量 DeepSeek 付费调用和必要非敏感代码上下文传输的授权；派发前会简短告知，默认一次一个任务，最多两轮返工。闲聊、知识问答和简单单步修改不派发；凭据或运行时缺失时报告原因，不能假装执行。任务执行后的报告包含实际调用结果与已知 Token 用量。
+选择 `$dsh-collaboration` 或说“开启 DSH 辅助”，即可开启当前聊天；没有具体任务时不发送付费请求。开启后由 Codex 拆分任务、调用 DSH、审查和整合结果。“关闭 DSH 辅助”停止后续派发，“这次不用 DSH”只跳过本次。开启状态不传播到其他聊天。
 
-可以说“这次不用 DSH”跳过本次，或“关闭自动 DSH”暂停当前聊天的自动协作。“启用 DSH”及 `$dsh-collaboration` 仍可显式调用；只有启用、没有具体任务时不产生付费请求。技能由 Codex 根据上下文选择，不是拦截所有请求的后台服务；它不会自行启动任务或自动执行付费 `verify-live`。
+聊天回复可以提供“开启 DSH / 关闭 DSH”的 follow-up 按钮，点击会发送明确指令。这是消息中的快捷入口，不能通过技能配置把自定义滑动开关加入 Codex 原生输入框；已运行的付费任务也不会仅因关闭指令自动取消。新规则未被加载时新开聊天或重启 Codex。
 
 ## 离线诊断与实时检查
 
