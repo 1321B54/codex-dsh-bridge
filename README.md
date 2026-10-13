@@ -44,6 +44,35 @@ Node/PowerShell 的机器路径仅写入忽略的 `.state/runtime-launch.json`�
 用户级技能目录是 `$HOME/.agents/skills/dsh-collaboration`；新技能未被发现时重启 Codex。
 自然语言“用 DSH 协作模式”“启用 DSH”或 `$dsh-collaboration` 请求协作。只有启用、没有具体任务时，不调用付费模型。
 
+## 离线诊断与实时检查
+
+`doctor` **不产生付费请求**，只做本地 SDK 初始化和凭据文件存在检查。它返回 `doctor_mode: "offline"`、`paid_model_tasks: null`、`live_acceptance: "not_checked"`，认证及网络字段为 `null`。这些值表示本次未检查远端，不否定此前成功的调用；`model_requests_submitted: 0` 仅表示本次 doctor 没有提交模型请求。**paid_model_tasks 不是账户余额**，本工具不查询余额、账单或历史付费任务数。
+
+需要检查真实凭据和付费通道时，显式运行：
+
+```bash
+./dsh-task.sh verify-live
+~/.agents/skills/dsh-collaboration/scripts/invoke-dsh.sh verify-live
+```
+
+Windows 对应 `./dsh-task.ps1 -Command verify-live` 或技能入口的 `-Command verify-live`。
+
+`verify-live` **会产生一次很小的付费请求**：提交一个固定短任务，要求返回 `DSH_LIVE_VERIFY_OK`。它使用新的隔离诊断工作区和运行时 home，禁用模型工具、项目指令/技能发现及自动模型重试，不读取或复制调用者项目文件，不改变调用者项目。收到正确响应后由桥接在诊断工作区创建并校验固定内容的 `verified.txt`；这证明 API/SDK 通道及本地诊断文件校验，不单独证明模型 shell 沙箱。保留原 provider、模型、8192 输出上限、12 步软保护和沙箱策略。输出上限不是实际用量或金额上限；实际费用以服务商及返回用量为准。
+
+成功返回 `credential_valid: true`、`api_reachable: true`、`live_acceptance: "passed"`，以及 `model`、`finish_reason`、`model_steps` 和本次汇总 `usage`。最新检查存入忽略的 `.state/verify-live.json`，对应运行存入 `.state/runs/<run_id>/result.json`。离线 doctor 不会把历史实时检查当作当前认证状态，也不会自动调用 verify-live。
+
+失败的 `failure_category` 区分 `authentication`（鉴权失败）、`quota`（服务商明确报告余额/额度不足）、`rate_limit`（请求限流，不能据此判断余额）、`network`、`provider`（服务端故障）、`max_tokens`、`model_step_guard`、`timeout`、`interrupted` 和 `runtime`。响应内容或诊断文件校验失败为 `verification_failed`；缺少本机凭据为 `credential_missing`。无法证明的 `credential_valid` / `api_reachable` 返回 `null`，不是一律返回“没有钱”。
+
+## 运行用量与失败证据
+
+普通 `run` 和返工的 `result.json` 新增 `usage`、`usage_status`、`reported_model_requests`、`model_attempts`、`last_finish_reason` 和结构化失败类别。`session_id`、旧结果字段及 `run` / `--continue-from` 参数保持兼容。用量只统计本次运行，不叠加返工前的费用。
+
+`usage` 字段使用 snake_case：`input_tokens` 是锁定 SDK 报告的**未缓存输入**；`cache_read_tokens`、`cache_write_tokens` 为分开的缓存输入，`cache_tokens` 是两者之和；`prompt_tokens` 为未缓存输入加缓存输入；`output_tokens` 为输出；`total_tokens` 包括所有输入及输出。`reasoning_tokens` 仅在运行时报告时提供，不能再次加进总量。
+
+按每个已落盘的 `assistant/message` / `assistant/attempt` 汇总一次；重复事件去重，失败流内的累计快照只取最后一个，避免重复计费。每次事件都原子保存纯数字统计至 `.state/runs/<run_id>/metrics.json`，因此 max-tokens、13th-step guard、超时及中断后仍能保留已收到的 `model_steps`、`usage`、`last_finish_reason` 和 `session_id`。`last_finish_reason` 是最后收到的运行时终止原因；没有收到时为 `null`，实际桥接停止原因另见 `failure_category`。
+
+运行时尚未报告的用量为 `null`，`usage_status: "not_reported"`；缺少某次调用计数或被终止的未完成步骤为 `"partial"`；已收到的完整响应计数为 `"reported"`。部分统计仅代表已知用量，**不代表尚未收到计数的请求免费**，也不代替服务商账单。历史 `result.json` 不自动重写；新统计从本次修复后的运行开始。
+
 ## 派发与返工
 
 协调方先检查原项目 Git 状态，按明确清单把非敏感、允许外发的输入放入本仓库忽略的 `.workspaces/task01`。

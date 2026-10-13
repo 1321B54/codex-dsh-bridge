@@ -21,6 +21,7 @@ description: "用DSH协作模式、启用DSH（大小写和空格不敏感）时
 从当前聊天的项目/CWD 找真实项目根，读取适用的 AGENTS.md，检查分支、HEAD、工作区与暂存区，保留已有改动。不要把下述桥接安装目录误认为待开发项目。遵守用户的本地 Git 规则，不混入其他任务的改动。
 
 先按平台用 Linux 的 `scripts/invoke-dsh.sh doctor` 或 Windows 的 `scripts/invoke-dsh.ps1 -Command doctor` 检查运行时及凭据“存在与否”；它不发送模型任务。失败时报告具体缺失，不自动重装、切换无沙箱模式或重录 Token。缺少凭据时让用户在本机录入，不索取聊天明文。
+`doctor_mode: offline`、`paid_model_tasks: null` 和 `live_acceptance: not_checked` 表示此次未检查真实服务，不是余额或历史调用结论。只有用户明确要求实时检查时才调用 `verify-live`；它会提交一次固定短付费任务，详情见执行参考。
 
 ## 明确任务 → 执行 → 验收
 
