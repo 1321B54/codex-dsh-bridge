@@ -3,4 +3,4 @@ interface:
   short_description: "手动开启当前聊天的 DSH 辅助，由 Codex 规划、审查和验收"
   default_prompt: "使用 $dsh-collaboration 开启当前聊天的 DSH 辅助；仅开启模式，不执行付费任务。"
 policy:
-  allow_implicit_invocation: false
+  allow_implicit_invocation: true
