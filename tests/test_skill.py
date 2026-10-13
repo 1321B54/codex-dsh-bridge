@@ -1,4 +1,5 @@
 """Behavioral checks for the user-level skill entrypoint; never paid model runs."""
+import os
 import json
 from pathlib import Path
 import shutil
@@ -15,9 +16,19 @@ class SkillEntryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         launch = json.loads((bridge.STATE / "runtime-launch.json").read_text(encoding="utf-8-sig"))
-        cls.pwsh = launch["pwsh_path"]
+        cls.pwsh = launch.get("pwsh_path")
 
     def invoke(self, script, cwd, *arguments):
+        if os.name != "nt":
+            script = script.with_suffix(".sh") if script.name == "invoke-dsh.ps1" else bridge.BASE / "install-skill.sh"
+            converted = []
+            flags = {"-Workspace": "--workspace", "-TaskFile": "--task-file",
+                     "-ContinueFrom": "--continue-from", "-SkillRoot": "--skill-root"}
+            for arg in arguments:
+                if arg != "-Command":
+                    converted.append(flags.get(arg, arg))
+            return subprocess.run([str(script), *converted], cwd=cwd, capture_output=True,
+                                  text=True, encoding="utf-8", timeout=60)
         return subprocess.run([self.pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                                "-File", str(script), *arguments], cwd=cwd, capture_output=True,
                               text=True, encoding="utf-8", timeout=60)
@@ -53,7 +64,8 @@ class SkillEntryTests(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             script = scripts / "invoke-dsh.ps1"
-            shutil.copyfile(SKILL / "scripts" / "invoke-dsh.ps1", script)
+            for name in ("invoke-dsh.ps1", "invoke-dsh.sh", "invoke-dsh.py"):
+                shutil.copy2(SKILL / "scripts" / name, scripts / name)
             missing = root / "missing-bridge"
             (root / "bridge-location.json").write_text(json.dumps({"bridge_root": str(missing)}), encoding="utf-8")
             result = self.invoke(script, root, "-Command", "doctor")

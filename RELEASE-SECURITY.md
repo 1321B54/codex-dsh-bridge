@@ -34,3 +34,15 @@ The offline unittest suite passes 34 checks using a real pinned DSH runtime and 
 ## Remaining limits
 
 Read [SECURITY.md](SECURITY.md) before use. The runtime and model-directed child shell can access runtime API credentials, and Windows confinement does not guarantee read/network/process isolation. Source selection and limited-key/VM boundaries remain operator responsibilities. Only selected runtime paths were tested; this is not a full audit of every upstream dependency, real-provider service acceptance, an exact money budget, or a benchmark proving a savings ratio.
+
+
+## Linux adaptation evidence (2026-10-13)
+
+Validated on Linux x86_64 with CPython 3.14 and Node.js 24, using the same pinned SDK/runtime. The Linux lock includes published PyPI wheel hashes for glibc x86_64/aarch64; aarch64 has not been executed here. Original Windows evidence above is historical, not a new Windows validation.
+
+- Linux local setup, SDK doctor and source/installed skill entrypoints pass without a real API credential or paid request.
+- Real runtime with a loopback fake Messages service passes file/Bash writes, outside-write denial, approval rejection, event accounting and fresh-session rework.
+- Linux-specific tests verify private state/token permissions, dummy credential roundtrip, unsafe-mode/symlink/hardlink rejection and environment scrubbing.
+- Actual detached subprocesses are stopped on normal completion, timeout, cancellation (return code 130) and coordinator SIGKILL; a guardian adopts orphaned descendants because DSH shells can start independent sessions.
+- Existing skill preservation is tested. Installation uses Linux `renameat2(RENAME_NOREPLACE)` so concurrent destinations, including empty directories, are not replaced.
+- Linux credentials are not encrypted. No real-provider account/credit check, aarch64 acceptance, new Windows run or new dependency security audit is claimed.

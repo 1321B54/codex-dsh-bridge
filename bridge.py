@@ -1,4 +1,4 @@
-"""Bounded Windows coordinator -> official DSH SDK bridge. No paid calls in doctor."""
+"""Bounded Windows/Linux coordinator -> official DSH SDK bridge. No paid calls in doctor."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -20,7 +21,7 @@ import uuid
 
 BASE = Path(__file__).resolve().parent
 STATE = BASE / ".state"
-TOKEN = STATE / "token.dpapi"
+TOKEN = STATE / ("token.dpapi" if os.name == "nt" else "token.credentials")
 PATCH = BASE / "safe-profile.patch.yml"
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b")
@@ -137,6 +138,13 @@ def current_user_sid() -> str:
 
 
 def protect_state() -> None:
+    if sys.platform == "linux":
+        STATE.mkdir(mode=0o700, exist_ok=True)
+        info = STATE.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            raise BridgeError("Local state must be a real directory owned by the current user.")
+        STATE.chmod(0o700)
+        return
     STATE.mkdir(exist_ok=True)
     sid = current_user_sid()
     result = subprocess.run([system_tool("icacls.exe"), str(STATE), "/inheritance:r", "/grant:r",
@@ -147,6 +155,8 @@ def protect_state() -> None:
 
 def prepare_workspace(workspace: Path) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "linux":
+        return
     # Some Windows directories inherit OWNER RIGHTS rather than a user ACE. Files created by
     # an elevated process may have Administrators as owner; the restricted DSH
     # token disables that group. Grant the real user Modify on this disposable
@@ -159,8 +169,19 @@ def prepare_workspace(workspace: Path) -> None:
 
 def get_token() -> str:
     if not TOKEN.is_file():
-        raise BridgeError("No token configured. Run Set-Token.ps1 locally; do not paste it in chat.")
-    value = dpapi(TOKEN.read_bytes(), decrypt=True).decode("utf-8")
+        entry = "Set-Token.ps1" if os.name == "nt" else "set-token.sh"
+        raise BridgeError(f"No token configured. Run {entry} locally; do not paste it in chat.")
+    if sys.platform == "linux":
+        protect_state()
+        fd = os.open(TOKEN, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+                raise BridgeError("Linux credential must be a private, singly linked 0600 file owned by the current user.")
+            value = stream.read(8193).decode("utf-8")
+    else:
+        value = dpapi(TOKEN.read_bytes(), decrypt=True).decode("utf-8")
     if not value or len(value) > 8192 or any(c.isspace() for c in value):
         raise BridgeError("Invalid stored credential.")
     return value
@@ -175,10 +196,17 @@ def set_token() -> None:
     if len(value) < 16 or len(value) > 8192 or any(c.isspace() for c in value):
         raise BridgeError("Invalid credential length or whitespace.")
     protect_state()
-    temporary = TOKEN.with_suffix(".tmp")
-    temporary.write_bytes(dpapi(value.encode("utf-8")))
-    temporary.replace(TOKEN)
-    print("Credential encrypted for the current Windows user. No API request made.")
+    temporary = TOKEN.with_name(f".{TOKEN.name}-{uuid.uuid4().hex}.tmp")
+    data = value.encode("utf-8") if sys.platform == "linux" else dpapi(value.encode("utf-8"))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+        temporary.replace(TOKEN)
+    finally:
+        temporary.unlink(missing_ok=True)
+    storage = "stored in a private 0600 file (not encrypted)" if sys.platform == "linux" else "encrypted with Windows user DPAPI"
+    print(f"Credential {storage}. No API request made.")
 
 
 class WindowsJob:
@@ -226,11 +254,56 @@ class WindowsJob:
             self.handle = None
 
 
+class LinuxJob:
+    """A separate guardian watches this coordinator's lifetime pipe."""
+    def __init__(self, process: subprocess.Popen, lifetime_fd: int):
+        self.process = process
+        self.lifetime_fd = lifetime_fd
+
+    def close(self) -> None:
+        if self.lifetime_fd is not None:
+            os.close(self.lifetime_fd)
+            self.lifetime_fd = None
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+
+
+def worker_command() -> list[str]:
+    return [sys.executable, str(BASE / "bridge.py"), "_worker"]
+
+
+def spawn_supervised() -> tuple[subprocess.Popen, WindowsJob | LinuxJob]:
+    kwargs = dict(stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  text=True, encoding="utf-8", env=clean_environment(), cwd=BASE)
+    if sys.platform == "linux":
+        read_fd, write_fd = os.pipe()
+        try:
+            process = subprocess.Popen([sys.executable, str(BASE / "linux-supervise.py"),
+                                        str(read_fd), *worker_command()], pass_fds=(read_fd,), **kwargs)
+        except BaseException:
+            os.close(write_fd)
+            raise
+        finally:
+            os.close(read_fd)
+        return process, LinuxJob(process, write_fd)
+    process = subprocess.Popen(worker_command(), creationflags=subprocess.CREATE_NO_WINDOW, **kwargs)
+    try:
+        return process, WindowsJob(process)
+    except BaseException:
+        process.kill()
+        process.communicate()
+        raise
+
+
 def clean_environment() -> dict[str, str]:
     allowed = {"path", "pathext", "systemroot", "systemdrive", "windir", "comspec", "temp", "tmp",
                "userprofile", "appdata", "localappdata", "homedrive", "homepath", "username", "userdomain",
                "programfiles", "programfiles(x86)", "programw6432", "number_of_processors", "os",
                "processor_architecture"}
+    if sys.platform == "linux":
+        allowed = {"path", "home", "user", "logname", "lang", "lc_all", "lc_ctype", "tmpdir", "term"}
     env = {k: v for k, v in os.environ.items() if k.lower() in allowed}
     env.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1", DSH_TELEMETRY_DISABLED="1",
                DSH_TELEMETRY_MODE="DISABLED", DSH_PERMISSION_MODE="workspace-write")
@@ -241,7 +314,7 @@ def harness_options(workspace: Path, home: Path, settings: dict, key: str | None
     return dict(provider=settings["provider"], model=settings["model"],
                 reasoning_effort=settings["reasoning_effort"],
                 max_tokens=settings["max_output_tokens_per_request"], cwd=str(workspace), runtime_cwd=str(workspace),
-                dsh_home=str(home), dsh_bin=str(BASE / "dsh-runtime.cmd"), profile="sdk", patches=(str(PATCH),), api_key=key,
+                dsh_home=str(home), dsh_bin=str(BASE / ("dsh-runtime.cmd" if os.name == "nt" else "dsh-runtime.sh")), profile="sdk", patches=(str(PATCH),), api_key=key,
                 base_url=settings["base_url"], env={"DSH_TELEMETRY_DISABLED": "1", "DSH_TELEMETRY_MODE": "DISABLED",
                 "DSH_PERMISSION_MODE": "workspace-write"}, initialize_timeout_seconds=45,
                 request_timeout_seconds=min(settings["timeout_seconds"], 60), shutdown_timeout_seconds=2)
@@ -268,14 +341,15 @@ def managed_harness(options: dict):
 
 
 def worker() -> int:
-    # Block until the supervisor has attached this process to its Windows Job.
+    # Block until platform supervision is ready and the coordinator sends the task.
     request = json.loads(sys.stdin.read())
     key = ""
     try:
         settings = config()
         workspace = workspace_path(request["workspace"], settings)
         run_dir = STATE / "runs" / request["run_id"]
-        home = STATE / "homes" / hashlib.sha256(str(workspace).lower().encode()).hexdigest()[:16]
+        identity = str(workspace).lower() if os.name == "nt" else str(workspace)
+        home = STATE / "homes" / hashlib.sha256(identity.encode()).hexdigest()[:16]
         key = get_token()
         steps = 0
 
@@ -314,13 +388,8 @@ def worker() -> int:
 
 
 def supervise(request: dict, timeout: float) -> tuple[int, dict]:
-    process = subprocess.Popen([sys.executable, str(BASE / "bridge.py"), "_worker"],
-                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                               text=True, encoding="utf-8", env=clean_environment(), cwd=BASE,
-                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-    job = None
+    process, job = spawn_supervised()
     try:
-        job = WindowsJob(process)
         stdout, stderr = process.communicate(json.dumps(request, ensure_ascii=False), timeout=timeout)
         try:
             outcome = json.loads(stdout)
@@ -352,7 +421,7 @@ def run_task(args) -> int:
     if key in task or SECRET.search(task):
         raise BridgeError("Task text appears to contain an API key; credential transmission refused.")
     prepare_workspace(workspace)
-    STATE.mkdir(exist_ok=True)
+    protect_state()
     locks = STATE / "locks"
     locks.mkdir(exist_ok=True)
     lock = locks / "dispatch.lock"  # Serialize registry updates and task dispatch across workspaces.
@@ -424,7 +493,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="Offline runtime initialization; no model prompt or paid API call")
-    sub.add_parser("set-token", help="Hidden local input, stored with Windows user-scoped DPAPI")
+    sub.add_parser("set-token", help="Hidden local input; Windows DPAPI or Linux private 0600 file")
     sub.add_parser("_worker", help=argparse.SUPPRESS)
     run = sub.add_parser("run", help="Execute an explicitly authorized bounded task")
     run.add_argument("--workspace", required=True, help="Simple isolated workspace name")
@@ -432,6 +501,10 @@ def main() -> int:
     run.add_argument("--continue-from", help="Start fresh-session rework from a bridge-owned previous result")
     args = parser.parse_args()
     try:
+        if os.name != "nt" and sys.platform != "linux":
+            raise BridgeError("Only Windows and Linux are supported; no permission fallback.")
+        if sys.platform == "linux":
+            os.umask(0o077)
         if args.command == "doctor":
             doctor()
             return 0
