@@ -50,15 +50,18 @@ class BridgeUnitTests(unittest.TestCase):
             alias = root if root_alias else root / "example"
             if not root_alias:
                 root.mkdir()
-            command = subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32" / "cmd.exe"),
-                                      "/c", "mklink", "/J", str(alias), str(outside)], capture_output=True)
-            self.assertEqual(command.returncode, 0, command.stderr)
+            if os.name == "nt":
+                command = subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32" / "cmd.exe"),
+                                          "/c", "mklink", "/J", str(alias), str(outside)], capture_output=True)
+                self.assertEqual(command.returncode, 0, command.stderr)
+            else:
+                alias.symlink_to(outside, target_is_directory=True)
             try:
                 with patch.object(bridge, "BASE", base), self.assertRaises(bridge.BridgeError):
                     bridge.workspace_path("example", {"workspace_root": ".workspaces"})
             finally:
                 # Remove only the known fixture junction, never its destination.
-                os.rmdir(alias)
+                os.rmdir(alias) if os.name == "nt" else alias.unlink()
 
     def test_redacts_exact_key_and_key_patterns(self):
         self.assertEqual(bridge.redact("secret-value", "secret-value"), "[REDACTED]")
@@ -73,6 +76,7 @@ class BridgeUnitTests(unittest.TestCase):
         self.assertEqual(env["DSH_PERMISSION_MODE"], "workspace-write")
         self.assertEqual(env["DSH_TELEMETRY_DISABLED"], "1")
 
+    @unittest.skipUnless(os.name == "nt", "Windows DPAPI")
     def test_dpapi_roundtrip_without_real_token(self):
         value = b"offline-unit-test-not-a-real-token"
         cipher = bridge.dpapi(value)
@@ -128,6 +132,7 @@ class BridgeUnitTests(unittest.TestCase):
             notification = SimpleNamespace(method=method, payload={"event": event})
             self.assertEqual(bridge.count_model_step(notification, 3, 12), 3)
 
+    @unittest.skipUnless(os.name == "nt", "Windows Job")
     def test_windows_job_stops_descendant_processes(self):
         script = ("import subprocess,sys,time; sys.stdin.readline(); "
                   "p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); "
@@ -162,31 +167,22 @@ class BridgeUnitTests(unittest.TestCase):
             parent.communicate()
 
     def test_supervisor_collects_worker_result(self):
-        real_popen = subprocess.Popen
         script = "import sys,json; sys.stdin.read(); print(json.dumps({'type':'result','model_completed':True}))"
-        def launch(_args, **kwargs):
-            return real_popen([sys.executable, "-c", script], **kwargs)
-        with patch.object(bridge.subprocess, "Popen", side_effect=launch):
+        with patch.object(bridge, "worker_command", return_value=[sys.executable, "-c", script]):
             code, result = bridge.supervise({"task": "offline fixture"}, 5)
         self.assertEqual(code, 0)
         self.assertTrue(result["model_completed"])
 
     def test_supervisor_timeout_is_failure(self):
-        real_popen = subprocess.Popen
         script = "import sys,time; sys.stdin.read(); time.sleep(60)"
-        def launch(_args, **kwargs):
-            return real_popen([sys.executable, "-c", script], **kwargs)
-        with patch.object(bridge.subprocess, "Popen", side_effect=launch):
+        with patch.object(bridge, "worker_command", return_value=[sys.executable, "-c", script]):
             code, result = bridge.supervise({"task": "offline fixture"}, 0.2)
         self.assertEqual(code, 124)
         self.assertEqual(result["type"], "error")
 
     def test_supervisor_rejects_malformed_output(self):
-        real_popen = subprocess.Popen
         script = "import sys; sys.stdin.read(); print('not JSON')"
-        def launch(_args, **kwargs):
-            return real_popen([sys.executable, "-c", script], **kwargs)
-        with patch.object(bridge.subprocess, "Popen", side_effect=launch):
+        with patch.object(bridge, "worker_command", return_value=[sys.executable, "-c", script]):
             code, result = bridge.supervise({"task": "offline fixture"}, 5)
         self.assertEqual(code, 2)
         self.assertEqual(result["type"], "error")

@@ -1,0 +1,21 @@
+name: Linux offline checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install locked local runtime and run offline doctor
+        run: ./setup.sh
+      - name: Test real runtime against local fake API (no secrets or paid calls)
+        run: .venv/bin/python -m unittest discover -s tests -v

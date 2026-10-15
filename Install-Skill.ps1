@@ -5,7 +5,7 @@ $destination = Join-Path $SkillRoot 'dsh-collaboration'
 # Existing installations may belong to another project and must never be overwritten.
 if (Test-Path -LiteralPath $destination) { throw 'A skill already exists here. Preserve it; choose another SkillRoot or review a manual replacement.' }
 $source = Join-Path $PSScriptRoot 'skills\dsh-collaboration'
-$files = @('SKILL.md','agents\openai.yaml','scripts\invoke-dsh.ps1','references\operations.md')
+$files = @('SKILL.md','agents\openai.yaml','scripts\invoke-dsh.ps1','scripts\invoke-dsh.sh','scripts\invoke-dsh.py','references\operations.md')
 foreach ($file in $files) {
     if (-not (Test-Path -LiteralPath (Join-Path $source $file) -PathType Leaf)) { throw "Skill source is incomplete: $file" }
 }

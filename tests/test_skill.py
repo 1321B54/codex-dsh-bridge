@@ -1,10 +1,13 @@
 """Behavioral checks for the user-level skill entrypoint; never paid model runs."""
+import os
+import importlib.util
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import bridge
 
@@ -15,9 +18,19 @@ class SkillEntryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         launch = json.loads((bridge.STATE / "runtime-launch.json").read_text(encoding="utf-8-sig"))
-        cls.pwsh = launch["pwsh_path"]
+        cls.pwsh = launch.get("pwsh_path")
 
     def invoke(self, script, cwd, *arguments):
+        if os.name != "nt":
+            script = script.with_suffix(".sh") if script.name == "invoke-dsh.ps1" else bridge.BASE / "install-skill.sh"
+            converted = []
+            flags = {"-Workspace": "--workspace", "-TaskFile": "--task-file",
+                     "-ContinueFrom": "--continue-from", "-SkillRoot": "--skill-root"}
+            for arg in arguments:
+                if arg != "-Command":
+                    converted.append(flags.get(arg, arg))
+            return subprocess.run([str(script), *converted], cwd=cwd, capture_output=True,
+                                  text=True, encoding="utf-8", timeout=60)
         return subprocess.run([self.pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                                "-File", str(script), *arguments], cwd=cwd, capture_output=True,
                               text=True, encoding="utf-8", timeout=60)
@@ -32,7 +45,9 @@ class SkillEntryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             status = json.loads(result.stdout)
             self.assertEqual(status["sdk_initialization"], "passed")
-            self.assertEqual(status["paid_model_tasks"], 0)
+            self.assertIsNone(status["paid_model_tasks"])
+            self.assertEqual(status["doctor_mode"], "offline")
+            self.assertEqual(status["live_acceptance"], "not_checked")
             self.assertEqual(status["model"], "deepseek-flash")
             self.assertEqual(marker.read_text(encoding="utf-8"), "preserve me")
             self.assertEqual({p.name for p in project.iterdir()}, {marker.name})
@@ -53,7 +68,8 @@ class SkillEntryTests(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             script = scripts / "invoke-dsh.ps1"
-            shutil.copyfile(SKILL / "scripts" / "invoke-dsh.ps1", script)
+            for name in ("invoke-dsh.ps1", "invoke-dsh.sh", "invoke-dsh.py"):
+                shutil.copy2(SKILL / "scripts" / name, scripts / name)
             missing = root / "missing-bridge"
             (root / "bridge-location.json").write_text(json.dumps({"bridge_root": str(missing)}), encoding="utf-8")
             result = self.invoke(script, root, "-Command", "doctor")
@@ -65,7 +81,7 @@ class SkillEntryTests(unittest.TestCase):
         self.assertFalse((SKILL / "bridge-location.json").exists())
         result = self.invoke(SKILL / "scripts" / "invoke-dsh.ps1", bridge.BASE.parent, "-Command", "doctor")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["paid_model_tasks"], 0)
+        self.assertIsNone(json.loads(result.stdout)["paid_model_tasks"])
 
     def test_installer_creates_portable_local_mapping_and_entry(self):
         with tempfile.TemporaryDirectory(dir=bridge.STATE, prefix="skill-install-") as folder:
@@ -77,7 +93,7 @@ class SkillEntryTests(unittest.TestCase):
             self.assertEqual(Path(mapping["bridge_root"]), bridge.BASE)
             result = self.invoke(installed / "scripts" / "invoke-dsh.ps1", root, "-Command", "doctor")
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["paid_model_tasks"], 0)
+            self.assertIsNone(json.loads(result.stdout)["paid_model_tasks"])
             self.assertEqual({p.name for p in root.iterdir()}, {"dsh-collaboration"})
 
     def test_installer_never_overwrites_an_existing_skill(self):
@@ -91,6 +107,17 @@ class SkillEntryTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(marker.read_text(encoding="utf-8"), "preserve existing skill")
             self.assertEqual({p.name for p in installed.iterdir()}, {marker.name})
+
+    @unittest.skipUnless(os.name != "nt", "Linux entrypoint")
+    def test_verify_live_entry_forwards_only_fixed_command_without_reading_task(self):
+        spec = importlib.util.spec_from_file_location("skill_entry", SKILL / "scripts" / "invoke-dsh.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with patch.object(module.sys, "argv", ["invoke-dsh.py", "verify-live"]), \
+                patch.object(module.os, "execv") as execute:
+            module.main()
+        execute.assert_called_once_with(str(bridge.BASE / ".venv/bin/python"),
+            [str(bridge.BASE / ".venv/bin/python"), str(bridge.BASE / "bridge.py"), "verify-live"])
 
 
 if __name__ == "__main__":

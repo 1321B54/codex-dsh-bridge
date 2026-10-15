@@ -1,0 +1,31 @@
+# Additional restrictions for ONE fixed diagnostic prompt. Normal run is unchanged.
+# Keep the existing sandbox, provider/model and 8192/12 limits; remove all tools,
+# external instruction/skill discovery and automatic model retries for this probe.
+- id: llm-retry
+  disabled: true
+- id: agent-instructions
+  disabled: true
+- id: skill-filesystem
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-todo
+  disabled: true
+- id: plan-mode
+  disabled: true
+- id: mcp-resources
+  disabled: true
+- id: system-prompt
+  config:
+    personaPrefix: Reply to the fixed connectivity check only. Do not use tools or read files.
+    personaSuffix: ''

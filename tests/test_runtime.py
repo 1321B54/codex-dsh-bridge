@@ -1,5 +1,7 @@
 """Real pinned DSH runtime + local fake Messages provider; no paid request."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import os
+import shlex
 import json
 from pathlib import Path
 import tempfile
@@ -31,7 +33,7 @@ class RuntimeIntegrationTests(unittest.TestCase):
                     tools = [{"name": t["name"], "parameters": t["input_schema"]} for t in body.get("tools", [])]
                     tool_use = (mode not in {"text", "resume"} and len(requests) == 1) or (mode == "escalate" and len(requests) == 2)
                     if tool_use:
-                        tool_name = "pwsh" if mode.startswith("shell") else "write"
+                        tool_name = ("pwsh" if os.name == "nt" else "bash") if mode.startswith("shell") else "write"
                         tool = next(t for t in tools if t.get("name") == tool_name)
                         props = tool["parameters"]["properties"]
                         target = outside if "deny" in mode or mode == "escalate" else workspace / "verified.txt"
@@ -39,6 +41,8 @@ class RuntimeIntegrationTests(unittest.TestCase):
                             args = {"command": "Set-Content -LiteralPath '" + str(target).replace("'", "''") +
                                     "' -Value 'OFFLINE_RUNTIME_WRITE_OK'", "description": "Write a disposable offline test fixture",
                                     "timeoutMs": 15000}
+                            if os.name != "nt":
+                                args["command"] = "printf '%s\\n' OFFLINE_RUNTIME_WRITE_OK > " + shlex.quote(str(target))
                         else:
                             path_key = next(k for k in ("file_path", "path", "filePath") if k in props)
                             content_key = next(k for k in ("content", "text") if k in props)
