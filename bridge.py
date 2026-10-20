@@ -313,7 +313,8 @@ def clean_environment() -> dict[str, str]:
         allowed = {"path", "home", "user", "logname", "lang", "lc_all", "lc_ctype", "tmpdir", "term"}
     env = {k: v for k, v in os.environ.items() if k.lower() in allowed}
     env.update(PYTHONIOENCODING="utf-8", PYTHONUTF8="1", DSH_TELEMETRY_DISABLED="1",
-               DSH_TELEMETRY_MODE="DISABLED", DSH_PERMISSION_MODE="workspace-write")
+               DSH_TELEMETRY_MODE="DISABLED", DSH_PERMISSION_MODE="workspace-write",
+               NO_PROXY="*", no_proxy="*", NODE_USE_ENV_PROXY="0")
     return env
 
 
@@ -323,7 +324,8 @@ def harness_options(workspace: Path, home: Path, settings: dict, key: str | None
                 max_tokens=settings["max_output_tokens_per_request"], cwd=str(workspace), runtime_cwd=str(workspace),
                 dsh_home=str(home), dsh_bin=str(BASE / ("dsh-runtime.cmd" if os.name == "nt" else "dsh-runtime.sh")), profile="sdk", patches=(str(PATCH),), api_key=key,
                 base_url=settings["base_url"], env={"DSH_TELEMETRY_DISABLED": "1", "DSH_TELEMETRY_MODE": "DISABLED",
-                "DSH_PERMISSION_MODE": "workspace-write"}, initialize_timeout_seconds=45,
+                "DSH_PERMISSION_MODE": "workspace-write", "NO_PROXY": "*", "no_proxy": "*",
+                "NODE_USE_ENV_PROXY": "0"}, initialize_timeout_seconds=45,
                 request_timeout_seconds=min(settings["timeout_seconds"], 60), shutdown_timeout_seconds=2)
 
 

@@ -2,6 +2,12 @@
 // Capture transport facts before the SDK flattens Error.cause. Never serialize
 // errors, requests, headers, URLs, stacks, addresses or response bodies.
 const channel = require('node:diagnostics_channel');
+const {Agent, Dispatcher1Wrapper, setGlobalDispatcher} = require('undici');
+// Use the already locked transport dependency. An ordinary Agent opens direct
+// sockets; it never reads proxy environment variables or system/PAC settings.
+const directAgent = new Agent({connect: {rejectUnauthorized: true}});
+const directFetchDispatcher = new Dispatcher1Wrapper(directAgent);
+setGlobalDispatcher(directAgent);
 const PREFIX = 'DSH_NETWORK_FACTS ';
 const CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN',
   'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH', 'EPIPE', 'EPROTO',
@@ -44,7 +50,7 @@ function install() {
     if (relevant(String(request?.origin))) report(error, 'transport');
   });
   globalThis.fetch = async function(input, options) {
-    try { return await original.call(this, input, options); }
+    try { return await original.call(this, input, {...options, dispatcher: directFetchDispatcher}); }
     catch (error) {
       if (relevant(typeof input === 'string' || input instanceof URL ? input : input?.url)) {
         report(error, 'request');
@@ -61,6 +67,7 @@ async function check(url, timeout = 8000) {
     // proves TLS/HTTP reachability only, never credential validity or balance.
     const response = await fetch(url.replace(/\/$/, '') + '/v1/messages', {
       method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(timeout),
+      dispatcher: directFetchDispatcher,
     });
     await response.body?.cancel();
     return {status: 'passed', http_status: response.status, error_codes: []};
@@ -79,5 +86,5 @@ if (require.main === module) {
     process.stdout.write(JSON.stringify({status: 'failed', http_status: null,
       error_codes: [], probe_error: true}) + '\n');
     process.exitCode = 2;
-  });
+  }).finally(() => directAgent.close());
 } else { install(); }

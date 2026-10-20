@@ -16,6 +16,13 @@ try:
     if installed != expected or not node.is_absolute() or not shell.is_absolute() or not node.is_file() or not shell.is_file():
         raise RuntimeError("Reviewed Node, shell or DSH runtime is missing; no fallback permitted.")
     env = os.environ.copy()
+    # Do not let inherited shell/system proxy adapters change the reviewed API
+    # route. Scope this to the child runtime; leave the desktop configuration alone.
+    for name in list(env):
+        if ("proxy" in name.lower() or name.upper() in {
+                "NODE_OPTIONS", "NODE_TLS_REJECT_UNAUTHORIZED"}):
+            env.pop(name)
+    env.update(NO_PROXY="*", no_proxy="*", NODE_USE_ENV_PROXY="0")
     env["PATH"] = os.pathsep.join((str(node.parent), str(shell.parent), env.get("PATH", "")))
     # Inherit JSON-RPC pipes directly; no stdout decoration and no intermediate file.
     network = base / "runtime-network.cjs"

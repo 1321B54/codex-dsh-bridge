@@ -77,6 +77,12 @@ Windows 使用 `-Command check-network`。它通过同一个 Node 运行时向�
 
 `network_diagnostics.error_codes` 保留白名单中的底层错误码，例如 `ECONNRESET`、`ENOTFOUND`、`ECONNREFUSED`、`UND_ERR_CONNECT_TIMEOUT` 或证书错误。运行时启动时加载桥接自有的观测模块，不修改上游依赖；仅记录错误码和阶段，丢弃原始异常文本、堆栈、请求头、URL、IP 及任务内容。TLS 证书校验始终开启。没有错误码时保持未知，不猜测余额问题。
 
+### DSH 请求固定直连
+
+DSH API 请求和网络预检使用锁定依赖中的普通直连 `Agent`，不使用代理 `Agent`。启动器移除大小写形式的代理环境变量、Node 环境代理开关及可注入代理模块的 `NODE_OPTIONS`，为子进程设置 `NO_PROXY=*` / `no_proxy=*`。运行时同时覆盖默认代理分发器和单次 fetch 的代理分发器，连接失败也不会回退到 HTTP/SOCKS 代理。TLS 证书验证保持开启，不修改系统代理设置。
+
+这保证的是应用层不使用显式代理；TUN、路由器透明代理、VPN 和系统路由仍能接管直连套接字。如果此类网络接管启用，需要在相应代理软件或路由器为 `api.deepseek.com` 设置 `DIRECT`，应用本身无法证明物理链路绕过了它们。网络检查成功也不等于完整付费验收。
+
 需要检查真实凭据和付费通道时，显式运行：
 
 ```bash
