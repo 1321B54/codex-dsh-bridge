@@ -62,6 +62,21 @@ Node/PowerShell 的机器路径仅写入忽略的 `.state/runtime-launch.json`�
 
 `doctor` **不产生付费请求**，只做本地 SDK 初始化和凭据文件存在检查。它返回 `doctor_mode: "offline"`、`paid_model_tasks: null`、`live_acceptance: "not_checked"`，认证及网络字段为 `null`。这些值表示本次未检查远端，不否定此前成功的调用；`model_requests_submitted: 0` 仅表示本次 doctor 没有提交模型请求。**paid_model_tasks 不是账户余额**，本工具不查询余额、账单或历史付费任务数。
 
+### 不计费网络检查
+
+```bash
+./dsh-task.sh check-network
+~/.agents/skills/dsh-collaboration/scripts/invoke-dsh.sh check-network
+```
+
+Windows 使用 `-Command check-network`。它通过同一个 Node 运行时向固定 API 地址发送一次无凭据的 HEAD 请求；不读取 Token、不发送模型任务、不读取调用者项目，不跟随重定向。任何 HTTP 状态只证明该地址的 TLS/HTTP 通道可达，不能证明鉴权成功、账户余额或模型可用。结果保存于忽略的 `.state/network-check.json`。
+
+`run`、返工及 `verify-live` 也会先做这项检查。连通性失败时返回 `finish_reason: network-preflight`，`model_requests_submitted: 0`，不会提交任务或自动重试；后续真实模型请求仍可能因网络变化而失败。检查使用固定短超时，不能据此保证后续长流式响应稳定。
+
+普通任务现在也禁用上游默认的 5 次自动重试，防止一次失败暗中触发 6 次尝试。失败后由协调方检查错误再决定是否使用现有 `--continue-from` 返工；这不改变 8192 输出上限、12 步保护、提供商、模型或沙箱设置。
+
+`network_diagnostics.error_codes` 保留白名单中的底层错误码，例如 `ECONNRESET`、`ENOTFOUND`、`ECONNREFUSED`、`UND_ERR_CONNECT_TIMEOUT` 或证书错误。运行时启动时加载桥接自有的观测模块，不修改上游依赖；仅记录错误码和阶段，丢弃原始异常文本、堆栈、请求头、URL、IP 及任务内容。TLS 证书校验始终开启。没有错误码时保持未知，不猜测余额问题。
+
 需要检查真实凭据和付费通道时，显式运行：
 
 ```bash

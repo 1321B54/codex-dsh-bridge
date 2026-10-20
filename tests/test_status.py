@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import os
+import socket
 from pathlib import Path
 import tempfile
 import threading
@@ -106,6 +107,8 @@ class DispatchTests(unittest.TestCase):
             stack.enter_context(patch.object(bridge, "STATE", state))
             stack.enter_context(patch.object(bridge, "get_token", return_value="dummy-unit-credential-not-real"))
             stack.enter_context(patch.object(bridge, "workspace_path", side_effect=lambda name, settings: workspaces / name))
+            stack.enter_context(patch.object(bridge, "probe_network", return_value={
+                "status": "passed", "http_status": 405, "error_codes": [], "timed_out": False}))
             yield root, state
 
     def test_doctor_is_explicitly_offline_and_never_runs_a_prompt(self):
@@ -213,6 +216,11 @@ class LiveProbeTests(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append(body)
+                if status == "disconnect":
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
                 if status != 200:
                     error_type = {401: "authentication_error", 402: "insufficient_balance", 429: "rate_limit_error", 503: "api_error"}[status]
                     data = json.dumps({"type": "error", "error": {"type": error_type, "message": error_type}}).encode()
@@ -335,6 +343,31 @@ class LiveProbeTests(unittest.TestCase):
                 self.assertEqual(result["live_acceptance"], "failed")
                 self.assertIsNone(result["usage"]["total_tokens"])
                 self.assertEqual(result["credential_valid"], False if status == 401 else None)
+
+    def test_normal_run_provider_error_does_not_retry_six_times(self):
+        code, result = self.exercise(status=503, live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["failure_category"], "provider")
+        self.assertEqual(result["model_attempts"], 1)
+
+    def test_failed_preflight_blocks_model_dispatch_with_actionable_error(self):
+        code, result = self.exercise(status="network", live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["finish_reason"], "network-preflight")
+        self.assertEqual(result["model_requests_submitted"], 0)
+        self.assertEqual(result["model_attempts"], 0)
+        self.assertEqual(result["model_steps"], 0)
+        self.assertIn("ECONNREFUSED", result["network_diagnostics"]["error_codes"])
+        self.assertIsNone(result["usage"]["total_tokens"])
+
+    def test_transport_failure_after_preflight_keeps_safe_runtime_cause_and_does_not_retry(self):
+        code, result = self.exercise(status="disconnect", live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["network_preflight"]["status"], "passed")
+        self.assertEqual(result["failure_category"], "network")
+        self.assertEqual(result["model_attempts"], 1)
+        self.assertTrue(set(result["network_diagnostics"]["error_codes"]) & {"UND_ERR_SOCKET", "ECONNRESET"})
+        self.assertIsNone(result["usage"]["total_tokens"])
 
     def test_probe_rejects_unexpected_response_without_acceptance(self):
         code, result = self.exercise(reply="Unexpected response")

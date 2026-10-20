@@ -18,7 +18,11 @@ try:
     env = os.environ.copy()
     env["PATH"] = os.pathsep.join((str(node.parent), str(shell.parent), env.get("PATH", "")))
     # Inherit JSON-RPC pipes directly; no stdout decoration and no intermediate file.
-    command = [str(node), str(package / "lib" / "bin.js"), *sys.argv[1:]]
+    network = base / "runtime-network.cjs"
+    if sys.argv[1:2] == ["--bridge-network-check"]:
+        command = [str(node), str(network), *sys.argv[2:]]
+    else:
+        command = [str(node), "--require", str(network), str(package / "lib" / "bin.js"), *sys.argv[1:]]
     if sys.platform == "linux":
         os.execve(str(node), command, env)
     raise SystemExit(subprocess.call(command, env=env))

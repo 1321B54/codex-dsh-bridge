@@ -21,6 +21,7 @@ $entry = Join-Path $HOME '.agents\skills\dsh-collaboration\scripts\invoke-dsh.ps
 ```
 
 `doctor` 不调用付费模型，只证明本地运行时初始化及凭据存在与否，不证明真实服务可用。
+遇到网络失败时先执行 Linux 的 `"$entry" check-network` 或 Windows 的 `& $entry -Command check-network`：它只发送一次无凭据 HEAD 请求，不提交模型任务、不读取 Token 或项目文件。新任务会自动先做同样的检查，失败即停止派发；不以成功的 HEAD 代替付费验收。普通任务不再自动重试 5 次，协调方应查看 `network_diagnostics.error_codes`，先排除网络故障，再决定返工，不循环调用付费 `verify-live`。
 它返回 `doctor_mode: offline`、`paid_model_tasks: null`、`live_acceptance: not_checked`。这不是账户余额，也不否定此前付费任务成功。
 只有用户明确要求实时通道检查时，执行 Linux 的 `"$entry" verify-live` 或 Windows 的 `& $entry -Command verify-live`。该命令会提交一次固定短付费任务，禁用模型工具和自动重试，不读取调用者项目；检查正确响应并由桥接创建诊断文件。
 实时状态在忽略的 `.state/verify-live.json`；本次运行结果及原子用量检查点在 `.state/runs/<run_id>/result.json` / `metrics.json`。失败按鉴权、额度、限流、网络、输出上限、模型步保护或超时等类别报告。未知认证/网络状态为 null，不把失败统一解读为没有余额。

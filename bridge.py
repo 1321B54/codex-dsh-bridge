@@ -20,7 +20,7 @@ import sys
 import time
 import uuid
 
-from run_metrics import FIELDS, RunMetrics, failure_category
+from run_metrics import FIELDS, NETWORK_CODES, RunMetrics, failure_category
 
 BASE = Path(__file__).resolve().parent
 STATE = BASE / ".state"
@@ -366,6 +366,52 @@ def redact_result(value, key: str):
     return value
 
 
+def probe_network(base_url: str) -> dict:
+    """Unauthenticated HEAD using the same Node transport. No credential access."""
+    try:
+        result = subprocess.run([sys.executable, str(BASE / "runtime-launch.py"),
+            "--bridge-network-check", base_url], env=clean_environment(),
+            capture_output=True, text=True, encoding="utf-8", timeout=12)
+        value = json.loads(result.stdout)
+        status = value.get("http_status")
+        passed = (result.returncode == 0 and value.get("status") == "passed"
+                  and type(status) is int and 100 <= status <= 599)
+        codes = value.get("error_codes", [])
+        return {"status": "passed" if passed else "failed", "http_status": status if passed else None,
+                "error_codes": sorted({code for code in codes if isinstance(code, str) and code in NETWORK_CODES})
+                    if isinstance(codes, list) else [], "timed_out": value.get("timed_out") is True}
+    except subprocess.TimeoutExpired:
+        return {"status": "failed", "http_status": None, "error_codes": ["ETIMEDOUT"], "timed_out": True}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"status": "failed", "http_status": None, "error_codes": [], "probe_error": True}
+
+
+def observe_runtime_network(harness, metrics: RunMetrics) -> None:
+    lines = getattr(getattr(harness, "client", None), "_stderr_lines", ())
+    # The pinned SDK keeps stderr in memory. Parse only our fixed-prefix records;
+    # never forward the general runtime stderr tail, which may contain task data.
+    for line in list(lines.copy() if hasattr(lines, "copy") else lines):
+        if isinstance(line, str) and line.startswith("DSH_NETWORK_FACTS ") and len(line) < 4096:
+            try:
+                metrics.observe_network(json.loads(line[len("DSH_NETWORK_FACTS "):]))
+            except (ValueError, TypeError):
+                pass
+
+
+def check_network() -> int:
+    settings = config()
+    result = probe_network(settings["base_url"])
+    outcome = {"type": "network_check", "doctor_mode": "network", "network_preflight": result,
+               "api_reachable": True if result["status"] == "passed" else None,
+               "credential_valid": None, "live_acceptance": "not_checked", "model_requests_submitted": 0,
+               "failure_category": None if result["status"] == "passed" else
+                   "runtime" if result.get("probe_error") else "timeout" if result.get("timed_out") else "network"}
+    protect_state()
+    save_json(STATE / "network-check.json", outcome)
+    print(json.dumps(outcome, ensure_ascii=False, indent=2))
+    return 0 if result["status"] == "passed" else 2
+
+
 def worker() -> int:
     # Block until platform supervision is ready and the coordinator sends the task.
     request = json.loads(sys.stdin.read())
@@ -373,6 +419,8 @@ def worker() -> int:
     metrics = RunMetrics(request["session_id"])
     run_dir = STATE / "runs" / request["run_id"]
     settings = None
+    harness = None
+    preflight = None
     try:
         settings = config()
         workspace = workspace_path(request["workspace"], settings)
@@ -383,6 +431,7 @@ def worker() -> int:
         save_json(run_dir / "metrics.json", metrics.snapshot())
 
         def observe(notification):
+            observe_runtime_network(harness, metrics)
             usage = metrics.observe(notification)
             item = {"time": round(time.time(), 3), "method": notification.method}
             if notification.method == "session.event":
@@ -412,8 +461,22 @@ def worker() -> int:
         options = harness_options(workspace, home, settings, key)
         if request.get("verify_live"):
             options["patches"] += (str(VERIFY_PATCH),)
+        preflight = probe_network(options["base_url"])
+        if preflight["status"] != "passed":
+            metrics.observe_network({"codes": preflight["error_codes"], "phase": "preflight"})
+            save_json(run_dir / "metrics.json", metrics.snapshot())
+            category = "runtime" if preflight.get("probe_error") else "timeout" if preflight.get("timed_out") else "network"
+            output = {"type": "error", **metrics.snapshot(), "model": settings["model"],
+                      "finish_reason": "network-preflight", "failure_category": category,
+                      "network_preflight": preflight, "model_requests_submitted": 0,
+                      "model_completed": False, "accepted_by_coordinator": False,
+                      "message": "Network preflight failed before model dispatch; no paid model request submitted."}
+            print(json.dumps(output), flush=True)
+            return 2
         with managed_harness(options) as harness:
             result = harness.run(task, session_id=request["session_id"], on_notification=observe)
+        observe_runtime_network(harness, metrics)
+        save_json(run_dir / "metrics.json", metrics.snapshot())
         completed = result.finish_reason == "completed"
         output = {"type": "result", **metrics.snapshot(), "workspace": str(workspace),
                   "model": settings["model"], "finish_reason": result.finish_reason,
@@ -421,9 +484,13 @@ def worker() -> int:
                   "failure_category": None if completed else metrics.error_category or failure_category(
                       reason=result.finish_reason, code=metrics.error_code, status=metrics.http_status),
                   "final_response": result.final_response}
+        output["network_preflight"] = preflight
         print(json.dumps(redact_result(output, key), ensure_ascii=False), flush=True)
         return 0 if completed else 2
     except Exception as exc:
+        observe_runtime_network(harness, metrics)
+        if run_dir.is_dir():
+            save_json(run_dir / "metrics.json", metrics.snapshot())
         output = {"type": "error", **metrics.snapshot(),
                   "model": settings["model"] if settings else None,
                   "finish_reason": metrics.last_finish_reason, "model_completed": False,
@@ -431,6 +498,7 @@ def worker() -> int:
                   "failure_category": failure_category(reason=metrics.last_finish_reason,
                       code=metrics.error_code, status=metrics.http_status, message=str(exc)),
                   "message": redact(str(exc), key)[:4000]}
+        output["network_preflight"] = preflight
         print(json.dumps(redact_result(output, key), ensure_ascii=False), flush=True)
         return 2
 
@@ -617,6 +685,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor", help="Offline runtime initialization; no model prompt or paid API call")
+    sub.add_parser("check-network", help="Unauthenticated HEAD connectivity check; no credential, project files or paid prompt")
     sub.add_parser("verify-live", help="One small PAID diagnostic prompt in a fresh workspace; no project files or tools")
     sub.add_parser("set-token", help="Hidden local input; Windows DPAPI or Linux private 0600 file")
     sub.add_parser("_worker", help=argparse.SUPPRESS)
@@ -635,6 +704,8 @@ def main() -> int:
             return 0
         if args.command == "verify-live":
             return verify_live()
+        if args.command == "check-network":
+            return check_network()
         if args.command == "set-token":
             set_token()
             return 0

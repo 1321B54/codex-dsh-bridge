@@ -10,6 +10,11 @@ FINISH_REASONS = {"stop", "tool-calls", "completed", "max-tokens", "error", "abo
 ERROR_CODES = {"AUTH", "INVALID_CREDENTIAL", "MISSING_CREDENTIAL", "QUOTA", "ACCOUNT_QUOTA",
                "RATE_LIMIT", "SERVER", "NETWORK", "TRANSPORT", "STREAM_CLOSED", "TIMEOUT", "ETIMEDOUT",
                "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "INVALID_REQUEST", "INVALID_RESPONSE"}
+NETWORK_CODES = {"ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ETIMEDOUT",
+                 "ENETUNREACH", "EHOSTUNREACH", "EPIPE", "EPROTO", "UND_ERR_CONNECT_TIMEOUT",
+                 "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET",
+                 "CERT_HAS_EXPIRED", "ERR_TLS_CERT_ALTNAME_INVALID", "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+                 "SELF_SIGNED_CERT_IN_CHAIN", "DEPTH_ZERO_SELF_SIGNED_CERT", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY"}
 
 
 def counters(value: object) -> dict:
@@ -33,6 +38,19 @@ class RunMetrics:
         self.sums = {}
         self.seen = set()
         self.incomplete_usage = False
+        self.network_codes = set()
+        self.network_phases = set()
+
+    def observe_network(self, value: object) -> None:
+        """Only accept predefined facts, never raw exception strings or URLs."""
+        if not isinstance(value, dict):
+            return
+        codes = value.get("codes", [])
+        if isinstance(codes, list):
+            self.network_codes.update(code for code in codes if isinstance(code, str) and code in NETWORK_CODES)
+        phase = value.get("phase")
+        if isinstance(phase, str) and phase in {"request", "transport", "preflight"}:
+            self.network_phases.add(phase)
 
     def observe(self, notification) -> dict:
         """Consume a durable event once. Never retain text, tool arguments or credentials."""
@@ -126,7 +144,9 @@ class RunMetrics:
                 "model_attempts": self.model_attempts, "reported_model_requests": self.reported_requests,
                 "usage": usage, "usage_status": status, "last_finish_reason": self.last_finish_reason,
                 "provider_error_code": self.error_code, "http_status": self.http_status,
-                "provider_failure_category": self.error_category}
+                "provider_failure_category": self.error_category,
+                "network_diagnostics": {"error_codes": sorted(self.network_codes),
+                    "phases": sorted(self.network_phases)} if self.network_phases else None}
 
 
 def failure_category(*, reason=None, code=None, status=None, message="") -> str:
