@@ -208,7 +208,7 @@ class DispatchTests(unittest.TestCase):
 
 
 class LiveProbeTests(unittest.TestCase):
-    def exercise(self, status=200, stop="end_turn", reply=bridge.VERIFY_REPLY, live=True):
+    def exercise(self, status=200, stop="end_turn", reply=bridge.VERIFY_REPLY, live=True, output_tokens=5):
         requests = []
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -232,7 +232,7 @@ class LiveProbeTests(unittest.TestCase):
                         ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
                         ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": reply}}),
                         ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-                        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": 5}}),
+                        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": output_tokens}}),
                         ("message_stop", {"type": "message_stop"}),
                     ]
                     data = "".join(f"event: {name}\ndata: {json.dumps(value)}\n\n" for name, value in events).encode()
@@ -299,7 +299,7 @@ class LiveProbeTests(unittest.TestCase):
                         self.assertFalse(requests[0].get("tools"), "No model tools may be offered")
                     else:
                         self.assertTrue(requests[0].get("tools"), "Normal run tools remain available")
-                    self.assertEqual(requests[0]["max_tokens"], 8192)
+                    self.assertEqual(requests[0]["max_tokens"], 393216)
                     self.assertEqual(requests[0]["model"], "deepseek-flash")
                 self.assertNotIn("PRIVATE_CALLER_MARKER_DO_NOT_SEND", json.dumps(requests))
                 self.assertNotIn("dummy-loopback-token-not-real", json.dumps(requests) + output.getvalue())
@@ -321,6 +321,14 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(result["model_steps"], 1)
         self.assertEqual(result["usage"]["total_tokens"], 20)
         self.assertEqual(result["usage"]["cache_tokens"], 5)
+
+    def test_normal_run_accepts_output_beyond_previous_8192_limit(self):
+        reply = "OFFLINE_LONG_OUTPUT " * 9000
+        code, result = self.exercise(live=False, reply=reply, output_tokens=9000)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["finish_reason"], "completed")
+        self.assertEqual(result["usage"]["output_tokens"], 9000)
+        self.assertEqual(result["final_response"].strip(), reply.strip())
 
     def test_real_runtime_max_tokens_keeps_usage_and_finish_reason(self):
         code, result = self.exercise(stop="max_tokens")

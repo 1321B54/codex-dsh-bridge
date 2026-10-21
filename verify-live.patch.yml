@@ -1,5 +1,5 @@
 # Additional restrictions for ONE fixed diagnostic prompt. Normal run is unchanged.
-# Keep the existing sandbox, provider/model and 8192/12 limits; remove all tools,
+# Keep the configured sandbox, provider/model, output limit and step guard; remove all tools,
 # external instruction/skill discovery and automatic model retries for this probe.
 - id: llm-retry
   disabled: true
