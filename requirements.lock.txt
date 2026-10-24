@@ -1,7 +1,7 @@
 annotated-types==0.8.0 --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
-deepseek-harness-runtime-bin==0.1.5rc1 --hash=sha256:d031a5ab4919c572fd7e48c7ef19ec8b1896e93d93c44b0937bb958c528f8acf
-deepseek-harness-sdk==0.1.5rc1 --hash=sha256:8d9897e97e8a95fd738cb2c3e2c563951d824e43847ec6f3b0fb172c0729b4d8
+deepseek-harness-runtime-bin==0.2.1rc2 --hash=sha256:d38c18f5117859feedaaa791a0eea37b8644bc187118e7e6f3afa231a5381cb7
+deepseek-harness-sdk==0.2.1rc2 --hash=sha256:30fc72c67f20ff4b46c6952087ea596fc70c2692001aa372185a24f9866bdc46
 pydantic==2.14.1 --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454
-pydantic_core==2.50.1 --hash=sha256:d32f3acc081cc3923386d88f422cde8892335e95f034e0104bb4cf9310d9915f
+pydantic-core==2.50.1 --hash=sha256:d32f3acc081cc3923386d88f422cde8892335e95f034e0104bb4cf9310d9915f
+typing-extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
 typing-inspection==0.4.4 --hash=sha256:65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147
-typing_extensions==4.16.0 --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

@@ -20,7 +20,7 @@ $bridge = Join-Path $bridgeRoot 'bridge.py'
 foreach ($path in @($python, $bridge, (Join-Path $bridgeRoot 'safe-profile.patch.yml'))) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "DSH installation is missing: $path. No automatic reinstall or permission fallback." }
 }
-$arguments = @($bridge, $Command)
+$arguments = @('-X', 'utf8', $bridge, $Command)
 if ($Command -eq 'run') {
     if (-not $Workspace -or -not $TaskFile) { throw 'A paid run requires an explicit workspace and task contract.' }
     $contract = (Resolve-Path -LiteralPath $TaskFile -ErrorAction Stop).Path

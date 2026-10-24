@@ -98,12 +98,14 @@ Windows 对应 `./dsh-task.ps1 -Command verify-live` 或技能入口的 `-Comman
 ```
 
 返回 `model_completed=true` 只说明执行结束；`accepted_by_coordinator` 永远为 false，主助手必须独立审查差异和测试。
-SDK 不支持跨进程采用已有会话；返工新建会话，带上最多 12000 字符旧报告和当前工作区文件。
+桥接仍按原策略返工：新建会话，带上最多 12000 字符旧报告和当前工作区文件。新版 SDK 支持持久化恢复，但本桥接未启用。
 一次只派发一个任务。失败、取消、超时均可能留下部分编辑；停止不回滚。残留锁必须先确认无活动任务，再人工处理。
 
 ## 固定版本与限制
 
-- 官方 Node DSH `@deepseek-ai/dsh@0.2.0-rc.2`、Python SDK `0.1.5rc1`；不使用 SDK 捆绑旧 SEA 运行时。
+HTTPS 检查软件导致的证书链问题，可按[仅对 DSH 补充本机 CA 信任](docs/local-tls-trust.md)配置；不关闭 TLS 校验、不上传证书文件。
+
+- 官方 Node DSH `@deepseek-ai/dsh@0.2.1-rc.2`、Python SDK `0.2.1rc2`；继续使用已验证的 Node 启动入口，不自动切换到 SDK 捆绑运行时。
 - `deepseek-flash`，官方 Messages 根地址 `https://api.deepseek.com/anthropic`；修改端点被拒绝。
 - `workspace-write` + `never`（拒绝审批升级，不是自动批准）。不自动 fallback 为全权限。
 - 600 秒超时，8192 单响应 token，12 模型步软保护；不是精准账单预算，通知时序、输入、重试、缓存或压缩可能影响费用。

@@ -38,3 +38,9 @@
   disabled: true
 - id: web-search-deepseek
   disabled: true
+- id: web-deepseek-api
+  disabled: true
+- id: tool-working-directory
+  disabled: true
+- id: tool-workspace-dependencies
+  disabled: true

@@ -74,7 +74,8 @@ class SkillEntryTests(unittest.TestCase):
             (root / "bridge-location.json").write_text(json.dumps({"bridge_root": str(missing)}), encoding="utf-8")
             result = self.invoke(script, root, "-Command", "doctor")
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("No automatic reinstall or permission fallback", result.stderr)
+            normalized = " ".join(result.stderr.replace("|", " ").split())
+            self.assertIn("No automatic reinstall or permission fallback", normalized)
             self.assertFalse(missing.exists())
 
     def test_source_skill_resolves_portable_bridge_without_private_mapping(self):

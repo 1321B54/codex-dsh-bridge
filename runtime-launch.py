@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from runtime_trust import with_local_ca
 
 base = Path(__file__).resolve().parent
 try:
@@ -15,7 +16,7 @@ try:
     expected = json.loads((base / "config.json").read_text(encoding="utf-8"))["runtime_version"]
     if installed != expected or not node.is_absolute() or not shell.is_absolute() or not node.is_file() or not shell.is_file():
         raise RuntimeError("Reviewed Node, shell or DSH runtime is missing; no fallback permitted.")
-    env = os.environ.copy()
+    env = with_local_ca(base, launch, os.environ)
     env["PATH"] = os.pathsep.join((str(node.parent), str(shell.parent), env.get("PATH", "")))
     # Inherit JSON-RPC pipes directly; no stdout decoration and no intermediate file.
     command = [str(node), str(package / "lib" / "bin.js"), *sys.argv[1:]]

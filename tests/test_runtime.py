@@ -108,6 +108,8 @@ class RuntimeIntegrationTests(unittest.TestCase):
                     names = {t["name"] for t in request["body"].get("tools", [])}
                     self.assertNotIn("subagent", names)
                     self.assertNotIn("subagent_fork", names)
+                    self.assertNotIn("working_directory", names)
+                    self.assertNotIn("workspace_dependencies", names)
                 if mode in {"write", "shell-write"}:
                     self.assertTrue((workspace / "verified.txt").exists(), str(requests[-1]["body"].get("messages", [])[-1:]))
                     self.assertEqual((workspace / "verified.txt").read_text(), "OFFLINE_RUNTIME_WRITE_OK\n")

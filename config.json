@@ -1,6 +1,6 @@
 {
-  "sdk_version": "0.1.5rc1",
-  "runtime_version": "0.2.0-rc.2",
+  "sdk_version": "0.2.1rc2",
+  "runtime_version": "0.2.1-rc.2",
   "provider": "deepseek-official",
   "model": "deepseek-flash",
   "reasoning_effort": "high",

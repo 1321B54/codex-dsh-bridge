@@ -1,1 +1,1 @@
-deepseek-harness-sdk==0.1.5rc1
+deepseek-harness-sdk==0.2.1rc2

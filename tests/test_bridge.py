@@ -15,8 +15,13 @@ import bridge
 
 
 class BridgeUnitTests(unittest.TestCase):
+    def test_shared_agent_home_is_task_local(self):
+        home = bridge.STATE / "test-isolated-home"
+        options = bridge.harness_options(bridge.BASE, home, bridge.config())
+        self.assertEqual(options["env"]["DSH_AGENTS_HOME"], str(home / "agents"))
+
     def test_config_matches_installed_version(self):
-        self.assertEqual(bridge.config()["sdk_version"], "0.1.5rc1")
+        self.assertEqual(bridge.config()["sdk_version"], "0.2.1rc2")
 
     def test_valid_workspace(self):
         root = bridge.BASE / ".workspaces"

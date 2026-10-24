@@ -45,7 +45,7 @@ def redact(value: str, key: str = "") -> str:
 
 
 def count_model_step(notification, current: int, limit: int) -> int:
-    # The pinned 0.2.0-rc.2 runtime emits step/start, not assistant/attempt.
+    # The reviewed runtime emits step/start; retries are not additional steps.
     # Count before the committed message; this remains a best-effort event guard.
     if notification.method == "session.event":
         event = notification.payload.get("event", {})
@@ -323,7 +323,8 @@ def harness_options(workspace: Path, home: Path, settings: dict, key: str | None
                 max_tokens=settings["max_output_tokens_per_request"], cwd=str(workspace), runtime_cwd=str(workspace),
                 dsh_home=str(home), dsh_bin=str(BASE / ("dsh-runtime.cmd" if os.name == "nt" else "dsh-runtime.sh")), profile="sdk", patches=(str(PATCH),), api_key=key,
                 base_url=settings["base_url"], env={"DSH_TELEMETRY_DISABLED": "1", "DSH_TELEMETRY_MODE": "DISABLED",
-                "DSH_PERMISSION_MODE": "workspace-write"}, initialize_timeout_seconds=45,
+                "DSH_PERMISSION_MODE": "workspace-write",
+                "DSH_AGENTS_HOME": str(home / "agents")}, initialize_timeout_seconds=45,
                 request_timeout_seconds=min(settings["timeout_seconds"], 60), shutdown_timeout_seconds=2)
 
 
@@ -496,7 +497,7 @@ def execute_task(workspace_name: str, task: str, settings: dict, key: str,
                 raise BridgeError("Rework handoff exceeds the prompt-size guard.")
             if key in task or SECRET.search(task):
                 raise BridgeError("Rework appears to contain an API key; credential transmission refused.")
-        # The pinned SDK cannot adopt a persisted Session in a new process.
+        # Deliberately keep fresh-session rework; SDK resume is not enabled here.
         # Rework uses a new session with a bounded report and the same files.
         session_id = f"session-{uuid.uuid4().hex}"
         run_id = uuid.uuid4().hex
