@@ -121,7 +121,7 @@ class BridgeUnitTests(unittest.TestCase):
         self.assertEqual(opts["profile"], "sdk")
         self.assertEqual(opts["cwd"], opts["runtime_cwd"])
         self.assertEqual(opts["model"], "deepseek-flash")
-        self.assertEqual(opts["max_tokens"], 8192)
+        self.assertEqual(opts["max_tokens"], 393216)
 
     def test_step_start_is_counted(self):
         notification = SimpleNamespace(method="session.event", payload={"event": {"type": "step/start"}})

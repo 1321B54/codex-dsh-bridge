@@ -8,7 +8,7 @@ import sys
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("doctor", "verify-live", "run"), nargs="?", default="doctor")
+    parser.add_argument("command", choices=("doctor", "check-network", "verify-live", "run"), nargs="?", default="doctor")
     parser.add_argument("--workspace")
     parser.add_argument("--task-file", type=Path)
     parser.add_argument("--continue-from")

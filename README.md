@@ -62,6 +62,27 @@ Node/PowerShell 的机器路径仅写入忽略的 `.state/runtime-launch.json`�
 
 `doctor` **不产生付费请求**，只做本地 SDK 初始化和凭据文件存在检查。它返回 `doctor_mode: "offline"`、`paid_model_tasks: null`、`live_acceptance: "not_checked"`，认证及网络字段为 `null`。这些值表示本次未检查远端，不否定此前成功的调用；`model_requests_submitted: 0` 仅表示本次 doctor 没有提交模型请求。**paid_model_tasks 不是账户余额**，本工具不查询余额、账单或历史付费任务数。
 
+### 不计费网络检查
+
+```bash
+./dsh-task.sh check-network
+~/.agents/skills/dsh-collaboration/scripts/invoke-dsh.sh check-network
+```
+
+Windows 使用 `-Command check-network`。它通过同一个 Node 运行时向固定 API 地址发送一次无凭据的 HEAD 请求；不读取 Token、不发送模型任务、不读取调用者项目，不跟随重定向。任何 HTTP 状态只证明该地址的 TLS/HTTP 通道可达，不能证明鉴权成功、账户余额或模型可用。结果保存于忽略的 `.state/network-check.json`。
+
+`run`、返工及 `verify-live` 也会先做这项检查。连通性失败时返回 `finish_reason: network-preflight`，`model_requests_submitted: 0`，不会提交任务或自动重试；后续真实模型请求仍可能因网络变化而失败。检查使用固定短超时，不能据此保证后续长流式响应稳定。
+
+普通任务现在也禁用上游默认的 5 次自动重试，防止一次失败暗中触发 6 次尝试。失败后由协调方检查错误再决定是否使用现有 `--continue-from` 返工；网络修复不改变输出配置、12 步保护、提供商、模型或沙箱设置。
+
+`network_diagnostics.error_codes` 保留白名单中的底层错误码，例如 `ECONNRESET`、`ENOTFOUND`、`ECONNREFUSED`、`UND_ERR_CONNECT_TIMEOUT` 或证书错误。运行时启动时加载桥接自有的观测模块，不修改上游依赖；仅记录错误码和阶段，丢弃原始异常文本、堆栈、请求头、URL、IP 及任务内容。TLS 证书校验始终开启。没有错误码时保持未知，不猜测余额问题。
+
+### DSH 请求固定直连
+
+DSH API 请求和网络预检使用锁定依赖中的普通直连 `Agent`，不使用代理 `Agent`。启动器移除大小写形式的代理环境变量、Node 环境代理开关及可注入代理模块的 `NODE_OPTIONS`，为子进程设置 `NO_PROXY=*` / `no_proxy=*`。运行时同时覆盖默认代理分发器和单次 fetch 的代理分发器，连接失败也不会回退到 HTTP/SOCKS 代理。TLS 证书验证保持开启，不修改系统代理设置。
+
+这保证的是应用层不使用显式代理；TUN、路由器透明代理、VPN 和系统路由仍能接管直连套接字。如果此类网络接管启用，需要在相应代理软件或路由器为 `api.deepseek.com` 设置 `DIRECT`，应用本身无法证明物理链路绕过了它们。网络检查成功也不等于完整付费验收。
+
 需要检查真实凭据和付费通道时，显式运行：
 
 ```bash
@@ -71,7 +92,7 @@ Node/PowerShell 的机器路径仅写入忽略的 `.state/runtime-launch.json`�
 
 Windows 对应 `./dsh-task.ps1 -Command verify-live` 或技能入口的 `-Command verify-live`。
 
-`verify-live` **会产生一次很小的付费请求**：提交一个固定短任务，要求返回 `DSH_LIVE_VERIFY_OK`。它使用新的隔离诊断工作区和运行时 home，禁用模型工具、项目指令/技能发现及自动模型重试，不读取或复制调用者项目文件，不改变调用者项目。收到正确响应后由桥接在诊断工作区创建并校验固定内容的 `verified.txt`；这证明 API/SDK 通道及本地诊断文件校验，不单独证明模型 shell 沙箱。保留原 provider、模型、8192 输出上限、12 步软保护和沙箱策略。输出上限不是实际用量或金额上限；实际费用以服务商及返回用量为准。
+`verify-live` **会产生一次很小的付费请求**：提交一个固定短任务，要求返回 `DSH_LIVE_VERIFY_OK`。它使用新的隔离诊断工作区和运行时 home，禁用模型工具、项目指令/技能发现及自动模型重试，不读取或复制调用者项目文件，不改变调用者项目。收到正确响应后由桥接在诊断工作区创建并校验固定内容的 `verified.txt`；这证明 API/SDK 通道及本地诊断文件校验，不单独证明模型 shell 沙箱。保留原 provider、模型、配置的输出上限、12 步软保护和沙箱策略。输出上限不是实际用量或金额上限；实际费用以服务商及返回用量为准。
 
 成功返回 `credential_valid: true`、`api_reachable: true`、`live_acceptance: "passed"`，以及 `model`、`finish_reason`、`model_steps` 和本次汇总 `usage`。最新检查存入忽略的 `.state/verify-live.json`，对应运行存入 `.state/runs/<run_id>/result.json`。离线 doctor 不会把历史实时检查当作当前认证状态，也不会自动调用 verify-live。
 
@@ -108,7 +129,8 @@ HTTPS 检查软件导致的证书链问题，可按[仅对 DSH 补充本机 CA �
 - 官方 Node DSH `@deepseek-ai/dsh@0.2.1-rc.2`、Python SDK `0.2.1rc2`；继续使用已验证的 Node 启动入口，不自动切换到 SDK 捆绑运行时。
 - `deepseek-flash`，官方 Messages 根地址 `https://api.deepseek.com/anthropic`；修改端点被拒绝。
 - `workspace-write` + `never`（拒绝审批升级，不是自动批准）。不自动 fallback 为全权限。
-- 600 秒超时，8192 单响应 token，12 模型步软保护；不是精准账单预算，通知时序、输入、重试、缓存或压缩可能影响费用。
+- 600 秒超时，393216 单响应 Token（384K），12 模型步软保护；不是精准账单预算，通知时序、输入、重试、缓存或压缩可能影响费用。
+- 已取消原来的 8192 输出限制，改用 2026-10-21 从当前 `deepseek-flash` 模型元数据查询到的服务端最大值 393216；单次响应无法真正无限。[官方模型元数据说明](https://api-docs.deepseek.com/api/list-models/)定义 `max_output_tokens` 为服务端接受的最大 `max_tokens`。不能只省略 SDK 参数，因为锁定运行时仍有自己的默认值；服务商以后调整上限时需重新核对配置。提高输出额度不改变超时、步数、模型或沙箱权限，也不会强迫模型生成到上限。
 - Windows Job 在超时/取消/父进程退出时停止工作进程及其后代。Linux 使用独立守护进程、生命周期管道和子进程收养；包括 shell 新建会话的后代，在正常结束、超时、取消或协调进程被终止时清理。守护进程自身遭 SIGKILL/系统崩溃不在此保证内。
 - 禁用额外会话日志上传、遥测、插件清单上传、网页工具及子 Agent/循环目标工具。
 

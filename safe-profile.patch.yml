@@ -1,4 +1,6 @@
 # Complete config replacements; validated against the pinned installed runtime.
+- id: llm-retry
+  disabled: true
 - id: sandbox-policy
   config:
     mode: workspace-write

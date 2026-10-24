@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import os
+import socket
 from pathlib import Path
 import tempfile
 import threading
@@ -106,6 +107,8 @@ class DispatchTests(unittest.TestCase):
             stack.enter_context(patch.object(bridge, "STATE", state))
             stack.enter_context(patch.object(bridge, "get_token", return_value="dummy-unit-credential-not-real"))
             stack.enter_context(patch.object(bridge, "workspace_path", side_effect=lambda name, settings: workspaces / name))
+            stack.enter_context(patch.object(bridge, "probe_network", return_value={
+                "status": "passed", "http_status": 405, "error_codes": [], "timed_out": False}))
             yield root, state
 
     def test_doctor_is_explicitly_offline_and_never_runs_a_prompt(self):
@@ -205,7 +208,7 @@ class DispatchTests(unittest.TestCase):
 
 
 class LiveProbeTests(unittest.TestCase):
-    def exercise(self, status=200, stop="end_turn", reply=bridge.VERIFY_REPLY, live=True):
+    def exercise(self, status=200, stop="end_turn", reply=bridge.VERIFY_REPLY, live=True, output_tokens=5):
         requests = []
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args):
@@ -213,6 +216,11 @@ class LiveProbeTests(unittest.TestCase):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 requests.append(body)
+                if status == "disconnect":
+                    self.close_connection = True
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                    return
                 if status != 200:
                     error_type = {401: "authentication_error", 402: "insufficient_balance", 429: "rate_limit_error", 503: "api_error"}[status]
                     data = json.dumps({"type": "error", "error": {"type": error_type, "message": error_type}}).encode()
@@ -224,7 +232,7 @@ class LiveProbeTests(unittest.TestCase):
                         ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
                         ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": reply}}),
                         ("content_block_stop", {"type": "content_block_stop", "index": 0}),
-                        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": 5}}),
+                        ("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None}, "usage": {"output_tokens": output_tokens}}),
                         ("message_stop", {"type": "message_stop"}),
                     ]
                     data = "".join(f"event: {name}\ndata: {json.dumps(value)}\n\n" for name, value in events).encode()
@@ -291,7 +299,7 @@ class LiveProbeTests(unittest.TestCase):
                         self.assertFalse(requests[0].get("tools"), "No model tools may be offered")
                     else:
                         self.assertTrue(requests[0].get("tools"), "Normal run tools remain available")
-                    self.assertEqual(requests[0]["max_tokens"], 8192)
+                    self.assertEqual(requests[0]["max_tokens"], 393216)
                     self.assertEqual(requests[0]["model"], "deepseek-flash")
                 self.assertNotIn("PRIVATE_CALLER_MARKER_DO_NOT_SEND", json.dumps(requests))
                 self.assertNotIn("dummy-loopback-token-not-real", json.dumps(requests) + output.getvalue())
@@ -314,6 +322,14 @@ class LiveProbeTests(unittest.TestCase):
         self.assertEqual(result["usage"]["total_tokens"], 20)
         self.assertEqual(result["usage"]["cache_tokens"], 5)
 
+    def test_normal_run_accepts_output_beyond_previous_8192_limit(self):
+        reply = "OFFLINE_LONG_OUTPUT " * 9000
+        code, result = self.exercise(live=False, reply=reply, output_tokens=9000)
+        self.assertEqual(code, 0)
+        self.assertEqual(result["finish_reason"], "completed")
+        self.assertEqual(result["usage"]["output_tokens"], 9000)
+        self.assertEqual(result["final_response"].strip(), reply.strip())
+
     def test_real_runtime_max_tokens_keeps_usage_and_finish_reason(self):
         code, result = self.exercise(stop="max_tokens")
         self.assertEqual(code, 2)
@@ -335,6 +351,31 @@ class LiveProbeTests(unittest.TestCase):
                 self.assertEqual(result["live_acceptance"], "failed")
                 self.assertIsNone(result["usage"]["total_tokens"])
                 self.assertEqual(result["credential_valid"], False if status == 401 else None)
+
+    def test_normal_run_provider_error_does_not_retry_six_times(self):
+        code, result = self.exercise(status=503, live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["failure_category"], "provider")
+        self.assertEqual(result["model_attempts"], 1)
+
+    def test_failed_preflight_blocks_model_dispatch_with_actionable_error(self):
+        code, result = self.exercise(status="network", live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["finish_reason"], "network-preflight")
+        self.assertEqual(result["model_requests_submitted"], 0)
+        self.assertEqual(result["model_attempts"], 0)
+        self.assertEqual(result["model_steps"], 0)
+        self.assertIn("ECONNREFUSED", result["network_diagnostics"]["error_codes"])
+        self.assertIsNone(result["usage"]["total_tokens"])
+
+    def test_transport_failure_after_preflight_keeps_safe_runtime_cause_and_does_not_retry(self):
+        code, result = self.exercise(status="disconnect", live=False)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["network_preflight"]["status"], "passed")
+        self.assertEqual(result["failure_category"], "network")
+        self.assertEqual(result["model_attempts"], 1)
+        self.assertTrue(set(result["network_diagnostics"]["error_codes"]) & {"UND_ERR_SOCKET", "ECONNRESET"})
+        self.assertIsNone(result["usage"]["total_tokens"])
 
     def test_probe_rejects_unexpected_response_without_acceptance(self):
         code, result = self.exercise(reply="Unexpected response")
