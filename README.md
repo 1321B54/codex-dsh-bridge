@@ -3,6 +3,10 @@
 Codex 负责规划、审查和验收，DeepSeek Harness 执行明确、有限的子任务。
 这是独立的社区桥接，不是 OpenAI 或 DeepSeek 官方集成。不承诺固定省费比例。
 
+## 候选发行版
+
+当前桥接版本为 **1.0.0-rc.1**（不是 DSH 自身版本）。见 [更新记录](CHANGELOG.md) 和 [发行检查清单](docs/releasing.md)。源码包不含本机凭据、证书、依赖或运行日志；安装与实时付费验证仍是独立步骤。
+
 ## Linux 安装
 
 需要 Python 3.14、Node.js 24、npm 和 Bash；支持 glibc Linux x86_64/aarch64，当前实测为 x86_64。先从官方渠道安装这些工具，在仓库目录运行：
@@ -130,7 +134,7 @@ HTTPS 检查软件导致的证书链问题，可按[仅对 DSH 补充本机 CA �
 - `deepseek-flash`，官方 Messages 根地址 `https://api.deepseek.com/anthropic`；修改端点被拒绝。
 - `workspace-write` + `never`（拒绝审批升级，不是自动批准）。不自动 fallback 为全权限。
 - 600 秒超时，393216 单响应 Token（384K），12 模型步软保护；不是精准账单预算，通知时序、输入、重试、缓存或压缩可能影响费用。
-- 已取消原来的 8192 输出限制，改用 2026-10-21 从当前 `deepseek-flash` 模型元数据查询到的服务端最大值 393216；单次响应无法真正无限。[官方模型元数据说明](https://api-docs.deepseek.com/api/list-models/)定义 `max_output_tokens` 为服务端接受的最大 `max_tokens`。不能只省略 SDK 参数，因为锁定运行时仍有自己的默认值；服务商以后调整上限时需重新核对配置。提高输出额度不改变超时、步数、模型或沙箱权限，也不会强迫模型生成到上限。
+- 已取消原来的 8192 输出限制，改用当前 `deepseek-flash` 服务端最大值 393216（2026-10-24 已核对[官方规格](https://api-docs.deepseek.com/quick_start/pricing/)）；单次响应无法真正无限。[官方模型元数据说明](https://api-docs.deepseek.com/api/list-models/)定义 `max_output_tokens` 为服务端接受的最大 `max_tokens`。不能只省略 SDK 参数，因为锁定运行时仍有自己的默认值；服务商以后调整上限时需重新核对配置。提高输出额度不改变超时、步数、模型或沙箱权限，也不会强迫模型生成到上限。
 - Windows Job 在超时/取消/父进程退出时停止工作进程及其后代。Linux 使用独立守护进程、生命周期管道和子进程收养；包括 shell 新建会话的后代，在正常结束、超时、取消或协调进程被终止时清理。守护进程自身遭 SIGKILL/系统崩溃不在此保证内。
 - 禁用额外会话日志上传、遥测、插件清单上传、网页工具及子 Agent/循环目标工具。
 
